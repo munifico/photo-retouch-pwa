@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="사진 보정">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+<title>사진 보정</title>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <button id="btn-pick" class="tb-btn">사진</button>
+    <h1 id="title">보정</h1>
+    <button id="btn-settings" class="tb-btn" aria-label="설정">설정</button>
+  </header>
+
+  <main>
+    <!-- 보정 -->
+    <section id="view-edit" class="view active">
+      <div id="stage" class="stage">
+        <canvas id="preview" hidden></canvas>
+        <div id="empty" class="empty">
+          <button id="btn-pick-empty" class="btn primary big">사진 선택</button>
+          <p>여러 장 선택 가능 · 모든 처리는 기기 안에서</p>
+        </div>
+        <div id="compare-badge" class="badge" hidden>원본</div>
+        <div id="stage-msg" class="stage-msg" hidden></div>
+      </div>
+      <div id="thumbs" class="thumbs" hidden></div>
+
+      <div class="edit-panel">
+        <div class="seg" role="tablist">
+          <button data-mode="presets" class="active">프리셋</button>
+          <button data-mode="adjust">조정</button>
+        </div>
+        <div id="panel-presets" class="chips"></div>
+        <div id="panel-adjust" hidden>
+          <div id="adj-tabs" class="adj-tabs"></div>
+          <div id="dial"></div>
+        </div>
+      </div>
+
+      <div class="actionbar">
+        <button id="btn-reset" class="btn">초기화</button>
+        <button id="btn-save-preset" class="btn">프리셋으로</button>
+        <button id="btn-export" class="btn primary">저장</button>
+      </div>
+    </section>
+
+    <!-- 프리셋 목록 -->
+    <section id="view-presets" class="view">
+      <div class="list-head">
+        <button id="btn-new-preset" class="btn primary wide">＋ 새 프리셋</button>
+      </div>
+      <ul id="preset-list" class="plist"></ul>
+      <p class="hint">탭: 선택 · 길게 누르기 / ··· : 편집 · 복제 · 이름 변경 · 삭제<br>≡ 를 끌어 순서 변경 · ★ 고정</p>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button data-view="edit" class="active">보정</button>
+    <button data-view="presets">프리셋</button>
+  </nav>
+</div>
+
+<!-- 프리셋 편집 -->
+<div id="sheet-editor" class="sheet" hidden>
+  <header class="sheet-head">
+    <button data-close class="tb-btn">취소</button>
+    <h2 id="ed-title">새 프리셋</h2>
+    <button id="ed-save" class="tb-btn strong">저장</button>
+  </header>
+  <div id="ed-preview-wrap" class="ed-preview" hidden><canvas id="ed-canvas"></canvas></div>
+  <div class="sheet-body">
+    <label class="field"><span>이름</span>
+      <input id="ed-name" type="text" maxlength="40" placeholder="예: 빈티지 필름" autocomplete="off" enterkeyhint="done">
+    </label>
+    <p id="ed-name-warn" class="warn" hidden></p>
+    <div class="row-btns">
+      <button id="ed-fill-text" class="btn">텍스트로 채우기</button>
+      <button id="ed-zero" class="btn">모두 0</button>
+    </div>
+    <div id="ed-parse-note" class="note" hidden></div>
+    <div id="ed-rows" class="ed-rows"></div>
+  </div>
+</div>
+
+<!-- 설정 -->
+<div id="sheet-settings" class="sheet" hidden>
+  <header class="sheet-head">
+    <span></span><h2>설정</h2><button data-close class="tb-btn strong">완료</button>
+  </header>
+  <div class="sheet-body">
+    <h3>저장 해상도</h3>
+    <div id="set-res" class="radio-list"></div>
+    <p id="set-limits" class="hint left"></p>
+    <h3>색 공간</h3>
+    <label class="switch-row"><span>넓은 색역 (Display P3)</span><input id="set-p3" type="checkbox"></label>
+    <p class="hint left">저장한 사진 색이 원본보다 흐려 보이면 끄세요.</p>
+    <h3>백업</h3>
+    <div class="row-btns">
+      <button id="set-export" class="btn">백업 내보내기</button>
+      <button id="set-import" class="btn">백업 가져오기</button>
+    </div>
+    <p id="set-persist" class="hint left"></p>
+    <h3>정보</h3>
+    <p class="hint left">모든 처리는 기기 안에서 이뤄지며 사진은 어디에도 업로드되지 않습니다.<br>보정 값은 아이폰 알고리즘의 근사치입니다.</p>
+  </div>
+</div>
+
+<!-- 가져오기 (백업 / 공유 링크) -->
+<div id="sheet-import" class="sheet" hidden>
+  <header class="sheet-head">
+    <button data-close class="tb-btn">취소</button>
+    <h2>프리셋 가져오기</h2>
+    <button id="imp-ok" class="tb-btn strong">가져오기</button>
+  </header>
+  <div class="sheet-body">
+    <p class="hint left">같은 이름이 있으면 뒤에 번호를 붙입니다.</p>
+    <ul id="imp-list" class="imp-list"></ul>
+  </div>
+</div>
+
+<!-- 저장 진행 -->
+<div id="sheet-export" class="sheet small" hidden>
+  <div class="sheet-body center">
+    <h2 id="ex-title">처리 중…</h2>
+    <progress id="ex-progress" max="1" value="0"></progress>
+    <p id="ex-detail" class="hint"></p>
+    <div id="ex-actions" class="col-btns" hidden>
+      <button id="ex-share" class="btn primary big">사진에 저장</button>
+      <button id="ex-download" class="btn">파일로 다운로드</button>
+      <button id="ex-close" class="btn">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 모달 (확인 / 입력 / 메뉴) -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-box">
+    <h3 id="modal-title"></h3>
+    <div id="modal-body"></div>
+    <div id="modal-btns" class="col-btns"></div>
+  </div>
+</div>
+
+<input type="file" id="file-photos" accept="image/*" multiple hidden>
+<input type="file" id="file-backup" accept="application/json,.json" hidden>
+<div id="toast" class="toast" hidden></div>
+</body>
+</html>

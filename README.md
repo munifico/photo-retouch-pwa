@@ -1,0 +1,76 @@
+# 사진 보정 PWA
+
+아이폰 사진 앱의 "보정" 값을 프리셋으로 저장해 두고, 사진에 한 번에 적용해 저장하는 웹앱.
+서버·외부 API 없음 — 모든 처리는 기기 안(WebGL)에서. 빌드 도구 없는 정적 파일이라 GitHub Pages 에 그대로 올라간다.
+
+## 쓰는 법
+1. 사파리로 열고 공유 → **홈 화면에 추가** (전체 화면 + 오프라인 + 저장소가 더 오래 유지됨)
+2. **사진** → 여러 장 선택 → 아래 프리셋 칩 선택 → 필요하면 **조정** 탭의 다이얼로 미세 조정
+3. 미리보기를 **길게 누르면 원본** 비교
+4. **저장** → 처리가 끝나면 **사진에 저장** → 공유 시트에서 "이미지 저장" (JPEG 품질 0.92)
+5. 조정한 값은 **프리셋으로** 버튼으로 새 프리셋 저장
+
+프리셋 탭: 탭 = 선택, 길게 누르기/··· = 편집·복제·이름 변경·공유 링크·삭제, ≡ 드래그 = 순서, ★ = 고정.
+새 프리셋에서 **텍스트로 채우기** 로 `• 노출: -35` 같은 텍스트를 붙여넣으면 폼에 채워진다(저장은 확인 후).
+
+## 파일 구조
+| 파일 | 역할 |
+|------|------|
+| `index.html`, `style.css`, `app.js` | UI |
+| `adjustments.js` | **보정 항목 정의 + 근사 계수(COEF) + 셰이더 커브** — 튜닝은 여기만 |
+| `parser.js` | 보정값 텍스트 파서 (별칭, 괄호 무시, 부호, 여러 프리셋) |
+| `renderer.js` | WebGL 파이프라인 (원본 + 큰 블러 → 한 패스 셰이더) |
+| `imageio.js` | 디코딩(EXIF 회전, 크기 제한), 풀해상도 JPEG 내보내기 |
+| `store.js` | localStorage, 백업 JSON, 공유 링크(`#p=`) |
+| `dial.js` | 가로 스크롤 다이얼 |
+| `sw.js`, `manifest.json`, `icons/` | PWA |
+| `test/` | 파서 테스트, 셰이더 테스트 페이지 |
+
+## 테스트
+```bash
+npm test                           # 파서 (node:test, 의존성 없음)
+python -m http.server 8000         # 그 다음 브라우저로
+# http://localhost:8000/test/shader-test.html  → 자동 검사 표 + 슬라이더로 수동 확인
+# http://localhost:8000/                       → 앱
+```
+ES 모듈이라 `file://` 로 직접 열면 동작하지 않는다 — 반드시 로컬 서버로.
+
+## 보정 튜닝
+아이폰 알고리즘은 비공개라 근사치다. `adjustments.js` 의 `COEF` 숫자를 바꾸고
+셰이더 테스트 페이지에서 같은 사진을 아이폰 결과와 나란히 비교하며 맞춘다.
+커브 모양 자체를 바꾸려면 같은 파일의 `FRAGMENT_BODY` 를 고친다.
+
+## GitHub Pages 배포
+1. GitHub 에 새 저장소를 만들고 이 폴더를 push (예: `photo-retouch-pwa`)
+   ```bash
+   git init && git add . && git commit -m "init"
+   git branch -M main
+   git remote add origin https://github.com/<계정>/photo-retouch-pwa.git
+   git push -u origin main
+   ```
+2. 저장소 **Settings → Pages**
+3. **Build and deployment → Source: Deploy from a branch**
+4. **Branch: `main` / 폴더: `/ (root)`** 선택 → **Save**
+5. 1~2분 뒤 `https://<계정>.github.io/photo-retouch-pwa/` 에서 열림
+   (이미 `<계정>.github.io` 사용자 사이트가 있어도 별개 경로라 충돌하지 않는다)
+
+모든 경로가 상대경로라 하위 경로(`/photo-retouch-pwa/`)에서 그대로 동작한다.
+
+### 업데이트 배포 시 주의
+서비스 워커가 앱 파일을 캐시하므로, 파일을 고쳐 배포할 때는 **`sw.js` 의 `VERSION` 을 올린다**
+(`'v1'` → `'v2'`). 안 올리면 이미 설치된 폰은 예전 버전을 계속 쓴다.
+새 버전은 앱을 한 번 연 뒤 다시 열 때 적용된다.
+
+## 아이폰 사파리 대응
+- 캔버스/텍스처 한도(`MAX_TEXTURE_SIZE` 등)와 약 16.7MP 면적 한도를 넘으면 긴 변 기준으로 축소. 설정에서 4MP / 12MP / 최대 선택
+- 드로잉 버퍼가 조용히 줄어드는 경우를 감지해 더 작게 재시도
+- 미리보기는 저해상도(≤2048px)로 실시간, 저장할 때만 풀해상도
+- EXIF 회전: `createImageBitmap(file, { imageOrientation: 'from-image' })`, 미지원이면 `<img>` + 캔버스로 대체
+- HEIC 는 사파리 기본 디코딩. 실패하면 안내 메시지
+- 여러 장은 한 장씩 처리하고 텍스처·비트맵·WebGL 컨텍스트를 바로 해제
+- 공유 시트는 사용자 탭 안에서만 열리므로, 처리 후 "사진에 저장" 버튼을 한 번 더 누르게 함
+
+## 데이터
+- 프리셋: `localStorage` (`retouch.presets.v1`). 시작 시 `navigator.storage.persist()` 요청
+- 설정 → 백업 내보내기/가져오기 (JSON). 프리셋이 3개 이상이 되면 한 번 백업을 권함
+- 공유 링크: 값을 URL 해시(`#p=…`)에 넣는다. 열면 가져오기 화면이 뜬다

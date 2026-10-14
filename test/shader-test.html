@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>셰이더 테스트</title>
+<style>
+  :root { color-scheme: dark; --bg: #111; --fg: #eee; --muted: #999; --ok: #4ade80; --bad: #f87171; --line: #333; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  h2 { font-size: 15px; margin: 24px 0 8px; }
+  .wrap { display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
+  @media (max-width: 800px) { .wrap { grid-template-columns: 1fr; } }
+  .row { display: grid; grid-template-columns: 90px 1fr 44px; gap: 8px; align-items: center; }
+  .row.nz label { color: #fbbf24; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; }
+  .views { display: flex; gap: 8px; flex-wrap: wrap; }
+  .views figure { margin: 0; flex: 1 1 300px; }
+  .views canvas { width: 100%; height: auto; background: #000; display: block; }
+  figcaption { color: var(--muted); font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+  td.PASS { color: var(--ok); } td.FAIL { color: var(--bad); }
+  button, select, input[type=file] { font: inherit; }
+  pre { color: var(--muted); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>셰이더 파이프라인 테스트</h1>
+<p id="summary">실행 중…</p>
+<table><thead><tr><th>결과</th><th>검사</th><th>측정</th></tr></thead><tbody id="results"></tbody></table>
+
+<h2>수동 확인</h2>
+<div class="wrap">
+  <div>
+    <p>
+      <select id="sample"><option value="chart">테스트 차트</option><option value="flat">회색 평면</option></select>
+      <input type="file" id="file" accept="image/*">
+    </p>
+    <div id="sliders"></div>
+    <p><button id="reset">모두 0</button> <button id="vintage">빈티지 필름</button></p>
+    <pre id="info"></pre>
+  </div>
+  <div class="views">
+    <figure><canvas id="orig"></canvas><figcaption>원본</figcaption></figure>
+    <figure><canvas id="out"></canvas><figcaption>결과 (누르고 있으면 원본)</figcaption></figure>
+  </div>
+</div>
+<script type="module" src="shader-test.js"></script>
+</body>
+</html>
