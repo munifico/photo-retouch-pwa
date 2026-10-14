@@ -1,5 +1,5 @@
 // 오프라인용 서비스 워커. 앱 파일을 바꿔 배포할 때는 VERSION 을 올린다 (안 올리면 기존 캐시가 계속 쓰인다).
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `retouch-${VERSION}`;
 const FILES = [
   './',
@@ -10,6 +10,7 @@ const FILES = [
   'parser.js',
   'renderer.js',
   'imageio.js',
+  'icc-p3.js',
   'store.js',
   'dial.js',
   'manifest.json',
