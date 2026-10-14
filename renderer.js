@@ -1,5 +1,5 @@
-// WebGL 렌더러: 원본 텍스처 + 큰 반경 블러를 만든 뒤, adjustments.js 의 셰이더 한 패스로 모든 조정을 적용.
-import { KEYS, COEF, buildFragmentShader } from './adjustments.js';
+// WebGL 렌더러: 원본 텍스처 + 큰 반경 블러 + 라이트맵(31×31)을 만든 뒤, adjustments.js 의 셰이더 한 패스로 모든 조정을 적용.
+import { KEYS, COEF, buildFragmentShader, uniformValue, buildLightMap, LIGHTMAP_GRID, LIGHTMAP_CELL } from './adjustments.js';
 
 // 메인 패스: 화면 위쪽 = 이미지 첫 행 (업로드 시 FLIP_Y 를 쓰지 않는다 — ImageBitmap 은 무시되므로)
 const VS_MAIN = `attribute vec2 a_pos; varying vec2 v_uv;
@@ -63,13 +63,15 @@ export class Renderer {
       try { if ('unpackColorSpace' in gl) gl.unpackColorSpace = 'display-p3'; } catch { /* 미지원 */ }
     }
     this.colorSpace = gl.drawingBufferColorSpace || 'srgb';
+    // 업로드도 P3 로 받았는지 (셰이더가 sRGB 선형으로 바꿔 처리할지 결정)
+    this.isP3 = this.colorSpace === 'display-p3' && gl.unpackColorSpace === 'display-p3';
     this.maxSide = glMaxSide(gl);
 
     this.progMain = this._program(VS_MAIN, buildFragmentShader());
     this.progCopy = this._program(VS_PASS, FS_COPY);
     this.progBlur = this._program(VS_PASS, FS_BLUR);
     this.uMain = {};
-    for (const name of ['u_src', 'u_blur', 'u_texel', 'u_aspect', ...KEYS.map((k) => `u_${k}`)]) {
+    for (const name of ['u_src', 'u_blur', 'u_light', 'u_p3', 'u_texel', 'u_aspect', ...KEYS.map((k) => `u_${k}`)]) {
       this.uMain[name] = gl.getUniformLocation(this.progMain, name);
     }
 
@@ -80,6 +82,7 @@ export class Renderer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     this.srcTex = null;
     this.blurTex = null;
+    this.lightTex = null;
   }
 
   _program(vsSrc, fsSrc) {
@@ -163,33 +166,61 @@ export class Renderer {
     if (gl.drawingBufferWidth !== w || gl.drawingBufferHeight !== h) {
       throw new CanvasTooLargeError(`drawing buffer ${gl.drawingBufferWidth}x${gl.drawingBufferHeight} != ${w}x${h}`);
     }
-    if (this.srcTex) gl.deleteTexture(this.srcTex);
-    if (this.blurTex) this._freeTargets([this.blurTex]);
+    this._freeSourceTextures();
     this.srcTex = this._texture(w, h, source);
     this.width = w;
     this.height = h;
     this.source = keep ? source : null;
 
-    // 큰 블러: 2배씩 축소 → 목표 크기 → 가로/세로 가우시안
+    // 큰 블러: 축소 → 가로/세로 가우시안
     const sigma = Math.max(1, COEF.blurRadiusFrac * Math.min(w, h));
     const scale = Math.min(1, BLUR_SIGMA_TEXELS / sigma);
     const bw = Math.max(1, Math.round(w * scale));
     const bh = Math.max(1, Math.round(h * scale));
+    const a = this._downsample(bw, bh);
+    const b = this._target(bw, bh);
+    this._pass(this.progBlur, a.tex, b, { u_step: [1.5 / bw, 0] });
+    this._pass(this.progBlur, b.tex, a, { u_step: [0, 1.5 / bh] });
+    this._freeTargets([b]);
+    this.blurTex = a;
+
+    // 라이트맵: 정사각 축소본을 읽어 칸별 통계 → 31×31 텍스처 (종횡비 무관하게 이미지 전체를 칸으로 나눔)
+    const ls = LIGHTMAP_GRID * LIGHTMAP_CELL;
+    const small = this._downsample(ls, ls);
+    const px = new Uint8Array(ls * ls * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, small.fb);
+    gl.readPixels(0, 0, ls, ls, gl.RGBA, gl.UNSIGNED_BYTE, px); // FBO 는 원본과 같은 행 순서 → 위쪽 행부터
+    this._freeTargets([small]);
+    this.lightTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) {
+      gl.texParameteri(gl.TEXTURE_2D, k, v);
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, LIGHTMAP_GRID, LIGHTMAP_GRID, 0, gl.RGBA, gl.UNSIGNED_BYTE, buildLightMap(px));
+  }
+
+  // 원본을 2배씩 줄여 (tw, th) 타깃으로 (박스 평균에 가까워 앨리어싱이 적다)
+  _downsample(tw, th) {
     const temps = [];
-    let cur = { tex: this.srcTex, w, h };
-    while (cur.w / 2 >= bw && cur.h / 2 >= bh) {
+    let cur = { tex: this.srcTex, w: this.width, h: this.height };
+    while (cur.w / 2 >= tw && cur.h / 2 >= th) {
       const t = this._target(Math.max(1, cur.w >> 1), Math.max(1, cur.h >> 1));
       this._pass(this.progCopy, cur.tex, t);
       temps.push(t);
       cur = t;
     }
-    const a = this._target(bw, bh);
-    const b = this._target(bw, bh);
-    this._pass(this.progCopy, cur.tex, a);
-    this._pass(this.progBlur, a.tex, b, { u_step: [1.5 / bw, 0] });
-    this._pass(this.progBlur, b.tex, a, { u_step: [0, 1.5 / bh] });
-    this._freeTargets([...temps, b]);
-    this.blurTex = a;
+    const out = this._target(tw, th);
+    this._pass(this.progCopy, cur.tex, out);
+    this._freeTargets(temps);
+    return out;
+  }
+
+  _freeSourceTextures() {
+    const gl = this.gl;
+    if (this.srcTex) gl.deleteTexture(this.srcTex);
+    if (this.lightTex) gl.deleteTexture(this.lightTex);
+    if (this.blurTex) this._freeTargets([this.blurTex]);
+    this.srcTex = this.blurTex = this.lightTex = null;
   }
 
   /** values: { key: -100~100 } */
@@ -206,9 +237,13 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.blurTex.tex);
     gl.uniform1i(u.u_blur, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
+    gl.uniform1i(u.u_light, 2);
+    gl.uniform1f(u.u_p3, this.isP3 ? 1 : 0);
     gl.uniform2f(u.u_texel, 1 / this.width, 1 / this.height);
     gl.uniform1f(u.u_aspect, this.width / this.height);
-    for (const k of KEYS) gl.uniform1f(u[`u_${k}`], (Number(values?.[k]) || 0) / 100);
+    for (const k of KEYS) gl.uniform1f(u[`u_${k}`], uniformValue(k, values?.[k]));
     this._drawQuad();
   }
 
@@ -228,9 +263,8 @@ export class Renderer {
   dispose() {
     const gl = this.gl;
     if (!gl) return;
-    if (this.srcTex) gl.deleteTexture(this.srcTex);
-    if (this.blurTex) this._freeTargets([this.blurTex]);
-    this.srcTex = this.blurTex = this.source = null;
+    this._freeSourceTextures();
+    this.source = null;
     gl.getExtension('WEBGL_lose_context')?.loseContext();
     this.gl = null;
   }

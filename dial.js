@@ -10,9 +10,12 @@ export function createDial(container, { min = -100, max = 100, onInput }) {
   const scroller = container.querySelector('.dial-scroller');
   const ticks = container.querySelector('.dial-ticks');
   const label = container.querySelector('.dial-value');
-  ticks.style.width = `${(max - min) * TICK}px`;
   ticks.style.setProperty('--tick', `${TICK}px`);
-  ticks.style.setProperty('--zero', `${-min * TICK}px`);
+  const applyRange = () => {
+    ticks.style.width = `${(max - min) * TICK}px`;
+    ticks.style.setProperty('--zero', `${-min * TICK}px`);
+  };
+  applyRange();
 
   let value = 0;
   let snapTimer = 0;
@@ -53,5 +56,14 @@ export function createDial(container, { min = -100, max = 100, onInput }) {
     if (emit) onInput?.(value);
   }
 
-  return { set, get: () => value };
+  // 항목마다 범위가 다르다 (-100~100 / 0~100)
+  function setRange(lo, hi) {
+    if (lo === min && hi === max) return;
+    min = lo;
+    max = hi;
+    applyRange();
+    set(value);
+  }
+
+  return { set, setRange, get: () => value };
 }

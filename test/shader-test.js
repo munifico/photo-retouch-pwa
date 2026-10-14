@@ -1,5 +1,5 @@
 // 데스크톱 브라우저용 셰이더 검사. 자동 검사는 방향성(밝아지나/어두워지나)과 항등성만 본다 — 아이폰과 같은지는 눈으로.
-import { ADJUSTMENTS, KEYS, emptyValues } from '../adjustments.js';
+import { ADJUSTMENTS, KEYS, emptyValues, minOf, UI_SCALE } from '../adjustments.js';
 import { Renderer } from '../renderer.js';
 import { decodeImage, releaseSource } from '../imageio.js';
 
@@ -83,6 +83,13 @@ function check(name, ok, detail) {
 const f = (n) => n.toFixed(1);
 
 function runAuto() {
+  // 커널 수식 자체를 검사한다: UI 배율(실측 보정값)은 1.0 으로 고정하고 끝나면 되돌린다
+  const savedScale = { ...UI_SCALE };
+  for (const k of KEYS) UI_SCALE[k] = 1;
+  try { runChecks(); } finally { Object.assign(UI_SCALE, savedScale); }
+}
+
+function runChecks() {
   const chart = makeChart();
   const flat = makeFlat();
   const canvas = document.createElement('canvas');
@@ -107,11 +114,11 @@ function runAuto() {
     check(`노출 ${v > 0 ? '+' : ''}${v} → ${dir > 0 ? '밝아짐' : '어두워짐'}`, (s.l - base.l) * dir > 5, `램프 평균 ${f(base.l)} → ${f(s.l)}`);
   }
   {
-    const lin = S(render(chart, { exposure: 100 / 1.5 }), [200, 0, 16, 96]); // 1스톱: 선형 2배
+    const lin = S(render(chart, { exposure: 50 }), [200, 0, 16, 96]); // Apple: 게인 2^(2e) → +50 = 1스톱
     const b0 = S(id, [200, 0, 16, 96]);
     const toLin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
     const ratio = toLin(lin.l) / toLin(b0.l);
-    check('노출 1스톱 = 선형 공간 2배', Math.abs(ratio - 2) < 0.15, `비율 ${ratio.toFixed(2)}`);
+    check('노출 +50 = 1스톱 = 선형 공간 2배', Math.abs(ratio - 2) < 0.15, `비율 ${ratio.toFixed(2)}`);
   }
 
   {
@@ -153,18 +160,27 @@ function runAuto() {
   }
   {
     const vib = render(chart, { vibrance: 100 });
+    // 상대 증가율로 비교 (인코딩 공간에선 어두운 채널의 작은 변화가 절대값으로 크게 보인다)
     const gain = (i) => S(vib, patch(i)).sat - S(id, patch(i)).sat;
-    const low = gain(7), high = gain(0), skin = gain(6);
-    check('색 선명도 → 저채도에 더 강하게', low > high, `저채도 +${low.toFixed(3)} / 고채도 +${high.toFixed(3)}`);
+    const rel = (i) => S(vib, patch(i)).sat / S(id, patch(i)).sat;
+    const low = rel(7), high = rel(0), skin = gain(6);
+    check('색 선명도 → 저채도에 더 강하게 (상대 증가율)', low > high, `저채도 ×${low.toFixed(2)} / 고채도 ×${high.toFixed(2)}`);
     const satOnly = S(render(chart, { saturation: 100 * 0.9 }), patch(6)).sat - S(id, patch(6)).sat;
     check('색 선명도 → 피부톤 보호 (같은 채도 변화보다 작게)', skin < satOnly * 0.6, `피부 +${skin.toFixed(3)} / 채도만 +${satOnly.toFixed(3)}`);
   }
   {
     const f0 = S(render(flat, {}), [0, 0, 256, 256], 256);
-    const w = S(render(flat, { warmth: 100 }), [0, 0, 256, 256], 256);
-    check('따뜻함 +100 → R↑ B↓, 휘도 유지', w.r > f0.r + 5 && w.b < f0.b - 5 && Math.abs(w.l - f0.l) < 2, `R ${f(w.r)} B ${f(w.b)} L ${f(w.l)}`);
-    const t = S(render(flat, { tint: 100 }), [0, 0, 256, 256], 256);
-    check('색조 +100 → 마젠타 (G↓)', t.g < f0.g - 3 && t.r > t.g && t.b > t.g, `R ${f(t.r)} G ${f(t.g)} B ${f(t.b)}`);
+    // Apple 화이트밸런스는 채도에 비례해 움직인다 → 무채색은 거의 그대로, 색 있는 픽셀만 [V]
+    // (Apple 변환 행렬 행 합이 정확히 1 이 아니라 회색도 조금은 움직인다 → 색 있는 픽셀 대비 작으면 통과)
+    const gw = S(render(flat, { warmth: 100 }), [0, 0, 256, 256], 256);
+    const lowSat = patch(7);
+    const p0 = S(id, lowSat);
+    const w = S(render(chart, { warmth: 100 }), lowSat);
+    const grayShift = (gw.r - gw.b) - (f0.r - f0.b), colorShift = (w.r - w.b) - (p0.r - p0.b);
+    check('따뜻함 +100 → 색 있는 픽셀 R↑ B↓', colorShift > 5, `R-B 변화 ${f(colorShift)}`);
+    check('따뜻함 +100 → 무채색은 훨씬 덜 움직임', grayShift < colorShift / 4, `회색 ${f(grayShift)} / 색 ${f(colorShift)}`);
+    const t = S(render(chart, { tint: 100 }), lowSat);
+    check('색조 +100 → 마젠타 쪽 (G 상대적으로↓)', (t.r + t.b) / 2 - t.g > (p0.r + p0.b) / 2 - p0.g + 3, `R ${f(t.r)} G ${f(t.g)} B ${f(t.b)}`);
     const v = render(flat, { vignette: 100 });
     const corner = S(v, [0, 0, 8, 8], 256).l, center = S(v, [124, 124, 8, 8], 256).l;
     check('비네트 +100 → 모서리 어둡고 중앙 유지', corner < center - 30 && Math.abs(center - f0.l) < 2, `모서리 ${f(corner)} / 중앙 ${f(center)}`);
@@ -174,8 +190,7 @@ function runAuto() {
   {
     const s0 = S(id, R.stripes).sd;
     const sp = S(render(chart, { sharpness: 100 }), R.stripes).sd;
-    const sm = S(render(chart, { sharpness: -100 }), R.stripes).sd;
-    check('선명도 ± → 미세 디테일 증가/감소', sp > s0 + 5 && sm < s0 - 5, `표준편차 ${f(s0)} → +${f(sp)} / -${f(sm)}`);
+    check('선명도 +100 → 미세 디테일 증가', sp > s0 + 5, `표준편차 ${f(s0)} → ${f(sp)}`);
     const n0 = S(id, R.noise).sd;
     const nr = S(render(chart, { noiseReduction: 100 }), R.noise).sd;
     check('노이즈 감소 +100 → 평탄 영역 노이즈 감소', nr < n0 * 0.7, `표준편차 ${f(n0)} → ${f(nr)}`);
@@ -233,7 +248,7 @@ function setupManual() {
   for (const a of ADJUSTMENTS) {
     const row = document.createElement('div');
     row.className = 'row';
-    row.innerHTML = `<label>${a.label}</label><input type="range" min="-100" max="100" step="1" value="0"><output>0</output>`;
+    row.innerHTML = `<label>${a.label}</label><input type="range" min="${minOf(a.key)}" max="100" step="1" value="0"><output>0</output>`;
     const input = row.querySelector('input');
     input.addEventListener('input', () => {
       values[a.key] = Number(input.value);

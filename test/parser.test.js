@@ -167,3 +167,7 @@ test('빈 입력 / 값 없는 텍스트', () => {
 test('CRLF 줄바꿈', () => {
   assert.deepEqual(one('노출: -35\r\n대비: +35\r\n').presets[0].values, { exposure: -35, contrast: 35 });
 });
+
+test('선명도·명료도·노이즈 감소는 0~100 (음수는 0)', () => {
+  assert.deepEqual(one('선명도 -20\n명료도 30\n노이즈 감소 -5').presets[0].values, { sharpness: 0, definition: 30, noiseReduction: 0 });
+});

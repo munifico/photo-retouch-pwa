@@ -57,7 +57,7 @@ function parseSegment(seg) {
   if (!key) return null;
   const raw = Number(m[3]);
   const signed = m[2] && m[2] !== '+' && m[2] !== '\uFF0B' ? -raw : raw;
-  return { key, value: clampValue(signed), clamped: Math.abs(signed) > 100 };
+  return { key, value: clampValue(signed, key), clamped: clampValue(signed, key) !== Math.round(signed) };
 }
 
 /**

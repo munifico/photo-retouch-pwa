@@ -1,4 +1,4 @@
-import { ADJUSTMENTS, KEYS, emptyValues, clampValue } from './adjustments.js';
+import { ADJUSTMENTS, KEYS, emptyValues, clampValue, minOf } from './adjustments.js';
 import { parsePresetText } from './parser.js';
 import { Renderer } from './renderer.js';
 import { decodeImage, releaseSource, exportJpeg, exportName, maxPixelsFor, MAX_RES_OPTIONS, IOS_MAX_PIXELS } from './imageio.js';
@@ -352,6 +352,7 @@ function renderAdjTabs() {
 function selectAdj(key) {
   state.adjKey = key;
   renderAdjTabs();
+  dial.setRange(minOf(key), 100);
   dial.set(state.values[key]);
   $(`#adj-tabs [data-key="${key}"]`)?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 }
@@ -522,15 +523,16 @@ const ed = { id: null, values: emptyValues(), renderer: null, fromEdit: false, r
 const edRows = {};
 
 for (const a of ADJUSTMENTS) {
-  const range = h('input', { type: 'range', min: -100, max: 100, step: 1, value: 0 });
+  const range = h('input', { type: 'range', min: minOf(a.key), max: 100, step: 1, value: 0 });
   const num = h('input', { type: 'text', className: 'num', inputMode: 'numeric', autocomplete: 'off', value: '0' });
   num.setAttribute('enterkeyhint', 'done');
   const pm = h('button', { className: 'pm', textContent: '±', type: 'button', ariaLabel: '부호 바꾸기' });
+  if (minOf(a.key) >= 0) pm.style.visibility = 'hidden'; // 0~100 단방향 항목
   const row = h('div', { className: 'ed-row' }, h('label', { textContent: a.label }), range, pm, num);
   range.addEventListener('input', () => edSet(a.key, Number(range.value)));
   num.addEventListener('input', () => {
     const t = num.value.replace(/[−–—]/g, '-').replace(/[^\d-]/g, '');
-    if (/^-?\d+$/.test(t)) edSet(a.key, Number(t), { keepText: clampValue(t) === Number(t) });
+    if (/^-?\d+$/.test(t)) edSet(a.key, Number(t), { keepText: clampValue(t, a.key) === Number(t) });
   });
   num.addEventListener('change', () => edSet(a.key, ed.values[a.key]));
   num.addEventListener('focus', () => num.select());
@@ -545,7 +547,7 @@ for (const a of ADJUSTMENTS) {
 }
 
 function edSet(key, v, { keepText = false } = {}) {
-  v = clampValue(v);
+  v = clampValue(v, key);
   ed.values[key] = v;
   const r = edRows[key];
   r.range.value = v;

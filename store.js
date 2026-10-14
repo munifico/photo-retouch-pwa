@@ -38,7 +38,7 @@ export function newId() {
 
 export function fullValues(values) {
   const v = emptyValues();
-  for (const k of KEYS) if (values && k in values) v[k] = clampValue(values[k]);
+  for (const k of KEYS) if (values && k in values) v[k] = clampValue(values[k], k);
   return v;
 }
 
