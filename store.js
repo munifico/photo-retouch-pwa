@@ -11,9 +11,10 @@ export const DEFAULT_PRESETS = [
     values: { exposure: -35, highlights: -70, shadows: -30, contrast: 35, brightness: 10, blackPoint: 5, saturation: 25, vibrance: 20 },
   },
   {
-    // 실사판 《룩백》(2026, 35mm 필름) 스틸 측정: 블랙이 뜸, 낮은 채도, 그림자 살짝 차갑고 밝은 곳 따뜻함
+    // 실사판 《룩백》(2026, 35mm 필름) 한국 포스터 기준: 빈티지 필름처럼 진한 대비·채도에
+    // 연두 쪽 초록(색조 −), 시안 쪽 하늘(밝은 곳 색감 −), 올리브 그림자(그림자 색감 +), 거친 입자
     name: '룩백 필름',
-    values: { exposure: 25, brightness: 40, contrast: -20, highlights: -40, saturation: -20, warmth: 25, tint: -5, fade: 45, shadowTone: -20, highlightTone: 40, grain: 30 },
+    values: { exposure: -30, highlights: -70, shadows: -20, contrast: 30, brightness: 10, saturation: 30, vibrance: 25, warmth: 10, tint: -15, fade: 20, shadowTone: 25, highlightTone: -30, grain: 40 },
   },
 ];
 
