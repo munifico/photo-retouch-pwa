@@ -20,6 +20,11 @@ const ALIASES = {
   definition: ['명료도', 'definition', 'clarity', '정의', '디피니션'],
   noiseReduction: ['노이즈감소', 'noisereduction', '노이즈제거', '노이즈', 'noise'],
   vignette: ['비네트', 'vignette', '비네팅', 'vignetting'],
+  // 앱 전용 필름 항목 (아이폰 텍스트에는 없음 — 앱이 만든 요약 텍스트를 다시 붙여넣을 때용)
+  grain: ['그레인', 'grain', '입자', '필름입자'],
+  fade: ['바랜검정', 'fade', '페이드'],
+  shadowTone: ['그림자색감', 'shadowtone'],
+  highlightTone: ['밝은곳색감', 'highlighttone', '하이라이트색감'],
 };
 
 const ALIAS_MAP = new Map();

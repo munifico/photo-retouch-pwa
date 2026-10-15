@@ -10,6 +10,11 @@ export const DEFAULT_PRESETS = [
     name: '빈티지 필름',
     values: { exposure: -35, highlights: -70, shadows: -30, contrast: 35, brightness: 10, blackPoint: 5, saturation: 25, vibrance: 20 },
   },
+  {
+    // 실사판 《룩백》(2026, 35mm 필름) 스틸 측정: 블랙이 뜸, 낮은 채도, 그림자 살짝 차갑고 밝은 곳 따뜻함
+    name: '룩백 필름',
+    values: { exposure: 25, brightness: 40, contrast: -20, highlights: -40, saturation: -20, warmth: 25, tint: -5, fade: 45, shadowTone: -20, highlightTone: 40, grain: 30 },
+  },
 ];
 
 const DEFAULT_SETTINGS = { maxRes: '12', p3: true, backupHintShown: false };

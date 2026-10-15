@@ -200,6 +200,21 @@ function runChecks() {
     check('명료도 +100 → 큰 경계의 국소 대비 증가', e1 > e0 + 2, `표준편차 ${f(e0)} → ${f(e1)}`);
   }
   {
+    // 필름 (앱 전용)
+    const blk = S(render(chart, { fade: 100 }), [0, 0, 2, 96]).l;
+    const d0 = S(id, R.dark).l, b0 = S(id, R.bright).l;
+    const fd = render(chart, { fade: 100 });
+    check('바랜 검정 100 → 블랙이 뜨고 밝은 곳은 거의 그대로', blk > 30 && blk < 60 && S(fd, R.dark).l > d0 && Math.abs(S(fd, R.bright).l - b0) < 12, `블랙 → ${f(blk)}, 밝은 ${f(b0)}→${f(S(fd, R.bright).l)}`);
+    const f0 = S(render(flat, {}), [0, 0, 256, 256], 256);
+    const g = S(render(flat, { grain: 100 }), [0, 0, 256, 256], 256);
+    check('그레인 100 → 평탄면에 입자, 평균 밝기는 유지', g.sd > f0.sd + 3 && Math.abs(g.l - f0.l) < 2, `표준편차 ${f(f0.sd)}→${f(g.sd)} / 평균 ${f(f0.l)}→${f(g.l)}`);
+    const dark = R.dark, bright = R.bright;
+    const sc = render(chart, { shadowTone: -100 }), hw = render(chart, { highlightTone: 100 });
+    const sd = S(sc, dark), sd0 = S(id, dark), hb = S(hw, bright), hb0 = S(id, bright);
+    check('그림자 색감 −100 → 어두운 곳이 푸르게, 밝기 유지', (sd.b - sd.r) > (sd0.b - sd0.r) + 4 && Math.abs(sd.l - sd0.l) < 3, `B-R ${f(sd0.b - sd0.r)}→${f(sd.b - sd.r)}`);
+    check('밝은 곳 색감 +100 → 밝은 곳이 따뜻하게, 밝기 유지', (hb.r - hb.b) > (hb0.r - hb0.b) + 4 && Math.abs(hb.l - hb0.l) < 3, `R-B ${f(hb0.r - hb0.b)}→${f(hb.r - hb.b)}`);
+  }
+  {
     // 해상도 독립성: 2배 크기에서도 큰 블러 기반 효과(휘도)가 비슷해야 미리보기 = 저장 결과
     const big = document.createElement('canvas');
     big.width = W * 2; big.height = H * 2;

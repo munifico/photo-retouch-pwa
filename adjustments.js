@@ -23,6 +23,11 @@ export const ADJUSTMENTS = [
   { key: 'definition', label: '명료도', en: 'Definition', min: 0 },
   { key: 'noiseReduction', label: '노이즈 감소', en: 'Noise Reduction', min: 0 },
   { key: 'vignette', label: '비네트', en: 'Vignette' },
+  // 필름 [앱 전용 — 아이폰 사진 앱에 없는 항목. 아이폰 값을 붙여넣으면 0]
+  { key: 'grain', label: '그레인', en: 'Grain', min: 0 },
+  { key: 'fade', label: '바랜 검정', en: 'Fade', min: 0 },
+  { key: 'shadowTone', label: '그림자 색감', en: 'Shadow Tone' }, // − 차갑게(청록) / + 따뜻하게
+  { key: 'highlightTone', label: '밝은 곳 색감', en: 'Highlight Tone' },
 ];
 
 export const KEYS = ADJUSTMENTS.map((a) => a.key);
@@ -44,8 +49,9 @@ export function clampValue(v, key) {
 
 // ── UI ±100 이 필터 입력 몇에 해당하나 ─────────────────────
 // 슬라이더 표시값 = 입력 × 100 / ui_max [V]. ui_max 자체는 디컴파일에 없다.
-// 톤 항목(SmartTone)은 실측 1장(빈티지 필름 프리셋, 2026-10-14)에 맞춘 값: 1.0 이면 아이폰보다 훨씬 어두웠고
-// 0.3 에서 밝기·채도·색상이 함께 맞았다. 항목별로 따로 맞춘 값은 아니다 → 단일 슬라이더 보정 사진으로 확정할 것.
+// ⚠️ 미결정 (2026-10-14): 캘리브레이션 차트(SDR PNG)는 모든 톤 항목이 1.0 에서 아이폰과 RMSE ≤0.4/255 로 일치했다.
+// 0.3 은 HDR(게인맵) 카메라 사진 1장(빈티지 프리셋)에 우연히 맞춘 값이다. 아이폰은 HDR 사진을 별도 경로로 처리하므로
+// 배율 하나로는 둘 다 맞출 수 없다 — handoff.md "다음에 할 일" 참고.
 export const UI_SCALE = {
   exposure: 0.3, // [실측 1장] 0.3 → 노출 -100 = 게인 2^-0.6
   brilliance: 0.3, // [추정] 같은 SmartTone 그룹이라 같이 둠
@@ -73,8 +79,13 @@ export function uniformValue(key, v) {
 export const COEF = {
   wbStrength: 1.0, // [U] PIColorBalanceFilter inputStrength 기본값
 
-  shadowsNegStrength: 0.6, // [U] 그림자 − 는 CIHighlightShadowAdjust (상수 소실) → 근사
-  shadowsNegRange: 0.7, // [U] sqrt 휘도 이 값까지를 그림자로 봄
+  // 그림자 −: 원래 CIHighlightShadowAdjust(상수 소실). 차트 실측(−100)에 맞춘 채널별 식
+  //   c − s·A·max(1 − c/B, 0)  (선형, 0 에서 자름). 중간 값(−30 등)은 s 에 비례한다고 가정 [실측 −100 만]
+  shadowsNegA: 0.0475, // [실측] RMSE 1.5/255
+  shadowsNegB: 0.48, // [실측]
+
+  // 밝기 +: 실측 차트에선 iOS 18 커널의 c^… 혼합항이 없고 1−(1−c)^γ 항만 맞았다 (현재 iOS 에서 바뀐 듯)
+  brightnessGain: 1.45, // [실측] γ = 1 + 이것·b. RMSE 1.1/255
 
   noiseStrength: 1.0, // [U] Apple 은 바이래터럴. 여기선 3x3 평탄부 블러로 근사
   noiseEdgeLo: 0.02,
@@ -85,8 +96,15 @@ export const COEF = {
   blurRadiusFrac: 0.03, // [U] 명료도 국소 평균 블러 반경 = 짧은 변 × 이것
 
   vignetteRadius: 0.4, // [V] 새 비네트의 radius 기본값
-  vignetteStart: 0.3, // [U] CIVignetteEffect 내부 시작 거리 (반경 R 대비)
-  vignetteWidth: 0.9, // [U] 감쇠 폭 (반경 R 대비)
+  vignetteStart: 0.5, // [실측] CIVignetteEffect 감쇠 시작 거리 (반경 R 대비). RMSE 0.1/255
+  vignetteWidth: 1.0, // [실측] 감쇠 폭 (반경 R 대비)
+
+  // 필름 (앱 전용, 눈으로 맞춘 값). 인코딩(sRGB 곡선) 공간 기준
+  fadeBlack: 0.18, // 바랜 검정 100 → 순수 블랙이 이만큼 뜸 (≈46/255)
+  fadeWhite: 0.05, // 바랜 검정 100 → 순수 흰색이 이만큼 내려감
+  toneAmount: 0.07, // 색감 ±100 일 때 색 이동 크기
+  grainAmount: 0.10, // 그레인 100 일 때 중간톤 노이즈 폭
+  grainCells: 1100.0, // 짧은 변을 몇 칸으로 나눈 입자 크기인가 (해상도와 무관하게 같은 질감)
 };
 
 // ── 휘도/그림자용 라이트맵 [V] ─────────────────────────────
@@ -139,6 +157,7 @@ export function buildLightMap(rgba) {
 // ── 프래그먼트 셰이더 ─────────────────────────────────────
 // GLSL ES 1.00 (WebGL1/2 공용). 순서 [V]: 노이즈 감소 → 화이트밸런스 → 라이트맵(휘도, 그림자+)
 // → 노출·블랙 → 밝기 → 그림자− → 하이라이트 → 대비 → 채도 → 색 선명도 → 선명도 → 명료도 → 비네트
+// 그 뒤에 앱 전용 필름 단계 (인코딩 공간): 색감 → 바랜 검정 → 그레인
 export const FRAGMENT_BODY = /* glsl */ `
 float mean3(vec3 c) { return dot(c, vec3(0.333333)); }
 float y601(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
@@ -214,16 +233,13 @@ vec3 process(vec3 c, vec2 adj) {
     c = G * (c - B);
   }
 
-  // 밝기 [V]
+  // 밝기 + [실측 차트]: 1 − ((1−c)^γ + 0.6(γ−1)m(1−m²)/γ²)
   if (u_brightness > 0.0) {
-    float g = 2.0 * u_brightness + 1.0;
+    float g = 1.0 + K_brightnessGain * u_brightness;
     vec3 x = clamp(c, 0.0, 1.0);
-    vec3 ex = c - x;
     vec3 m = 1.0 - x;
-    vec3 r = 1.0 - (pow(m, vec3(g)) + 0.6 * ((g - 1.0) * m * (1.0 - m * m)) / (g * g));
-    vec3 x2 = pow(x, vec3(1.0 - (min(g, 2.95) - 1.0) / 2.6));
-    c = mix(x2, r, 0.85) + ex;
-  } else if (u_brightness < 0.0) {
+    c = 1.0 - (pow(m, vec3(g)) + 0.6 * ((g - 1.0) * m * (1.0 - m * m)) / (g * g)) + (c - x);
+  } else if (u_brightness < 0.0) { // [V 커널, 실측 없음]
     float g = 1.0 - 1.5 * u_brightness;
     vec3 x = max(c, 0.0);
     float lum = dot(x, vec3(0.39, 0.5, 0.11));
@@ -231,11 +247,9 @@ vec3 process(vec3 c, vec2 adj) {
     c = mix(pow(x, vec3(g)), p2, 0.8);
   }
 
-  // 그림자 음수 [U]: 원래는 CIHighlightShadowAdjust (상수 소실) → 어두운 곳만 누르는 근사
+  // 그림자 음수 [실측 차트 −100]: 어두운 곳을 빼서 누름, 0 에서 자름
   if (u_shadows < 0.0) {
-    float y = sqrt(max(mean3(c), 0.0));
-    float mask = 1.0 - smoothstep(0.0, K_shadowsNegRange, y);
-    c *= 1.0 + u_shadows * K_shadowsNegStrength * mask;
+    c = max(c + u_shadows * K_shadowsNegA * max(1.0 - c / K_shadowsNegB, 0.0), 0.0);
   }
 
   // 하이라이트 [V]: 밝은 픽셀(lum²)에만
@@ -318,6 +332,24 @@ float blurY(vec2 uv, float y0, float d) {
        + y0 * 0.25;
 }
 
+// 필름 색감 방향: + 따뜻하게(주황), − 차갑게(청록). 크기는 K_toneAmount 로
+vec3 filmTone(float v) {
+  return v >= 0.0 ? v * vec3(1.0, 0.25, -0.9) : -v * vec3(-0.85, 0.15, 0.7);
+}
+// 그레인용 해시 (sin 없이 — 큰 좌표에서도 모바일 GPU 정밀도 문제 없음)
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float valueNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), f.x),
+             mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
 void main() {
   vec3 src = texture2D(u_src, v_uv).rgb;
   vec2 adj = texture2D(u_light, v_uv).rg;
@@ -386,7 +418,32 @@ void main() {
   }
 
   if (u_p3 > 0.5) c = c.r * vec3(0.822462, 0.033194, 0.017083) + c.g * vec3(0.177538, 0.966806, 0.072397) + c.b * vec3(0.0, 0.0, 0.910520);
-  gl_FragColor = vec4(toEncoded(clamp(c, 0.0, 1.0)), 1.0);
+  vec3 e = toEncoded(clamp(c, 0.0, 1.0));
+
+  // ── 필름 [앱 전용]: 눈에 보이는 밝기 기준이라 인코딩 공간에서 ──
+  // 색감: 그림자/밝은 곳에 따로 색을 얹는다. 밝기는 유지 (색 이동에서 휘도 성분을 뺌)
+  if (u_shadowTone != 0.0 || u_highlightTone != 0.0) {
+    float y = y601(e);
+    vec3 t = filmTone(u_shadowTone) * (1.0 - y) * (1.0 - y) + filmTone(u_highlightTone) * y * y;
+    e += (t - y601(t)) * K_toneAmount;
+  }
+  // 바랜 검정: 블랙을 띄우고(아래쪽 3제곱) 흰색 끝을 살짝 누름(위쪽 4제곱). 단조 증가 유지
+  if (u_fade > 0.0) {
+    vec3 x = clamp(e, 0.0, 1.0);
+    vec3 m = 1.0 - x;
+    vec3 x2 = x * x;
+    e = x + u_fade * (K_fadeBlack * m * m * m - K_fadeWhite * x2 * x2);
+  }
+  // 그레인: 흑백 입자, 중간톤에서 가장 강함. 격자 크기를 짧은 변 기준으로 둬서 미리보기와 저장본이 같은 질감
+  if (u_grain > 0.0) {
+    vec2 size = 1.0 / u_texel;
+    vec2 p = v_uv * size * (K_grainCells / min(size.x, size.y));
+    float n = valueNoise(p) * 0.7 + valueNoise(p * 2.03 + 17.0) * 0.3 - 0.5;
+    float y = clamp(y601(e), 0.0, 1.0);
+    e += n * u_grain * K_grainAmount * (0.35 + 2.6 * y * (1.0 - y));
+  }
+
+  gl_FragColor = vec4(clamp(e, 0.0, 1.0), 1.0);
 }
 `;
 
